@@ -1,0 +1,50 @@
+cabal-version:      3.0
+name:               groq-hs
+version:            0.1.0.0
+license:            MIT
+author:             Alexander Staubo
+maintainer:         alex@purefiction.net
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Groq.AST
+                      Groq.Parser
+    -- other-modules:
+    build-depends:    base >=4.14 && <5,
+                      text,
+                      megaparsec,
+                      parser-combinators,
+                      containers,
+                      scientific,
+                      mtl
+    hs-source-dirs:   src
+    default-language: Haskell2010
+
+executable groq-hs
+    import:           warnings
+    main-is:          Main.hs
+    build-depends:    base >=4.14 && <5,
+                      groq-hs,
+                      text,
+                      megaparsec
+    hs-source-dirs:   example
+    default-language: Haskell2010
+
+test-suite groq-hs-test
+    import:           warnings
+    default-language: Haskell2010
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:    base >=4.14 && <5,
+                      groq-hs,
+                      hspec,
+                      hspec-megaparsec,
+                      text,
+                      scientific,
+                      megaparsec
