@@ -59,6 +59,19 @@ main = hspec $ do
       it "parses parameters '$param'" $ 
         parseExpr "$myParam" `shouldParse` AST.Param "myParam"
 
+    describe "Group and Tuple" $ do
+      it "parses single parenthesized expression as Group" $
+        parseExpr "(1 + 2)" `shouldParse` AST.Group (
+          AST.BinaryOperator AST.OpPlus (AST.Literal (AST.IntegerLiteral 1)) (AST.Literal (AST.IntegerLiteral 2))
+        )
+      
+      it "parses multiple parenthesized expressions as Tuple" $
+        parseExpr "(1, 2, 3)" `shouldParse` AST.Tuple [
+            AST.Literal (AST.IntegerLiteral 1)
+          , AST.Literal (AST.IntegerLiteral 2)
+          , AST.Literal (AST.IntegerLiteral 3)
+          ]
+
     describe "Data Structures" $ do
       it "parses array" $ 
         parseExpr "[1, 2, 3]" `shouldParse` AST.Array [

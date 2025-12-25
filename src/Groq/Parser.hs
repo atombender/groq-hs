@@ -90,14 +90,21 @@ literal :: Parser AST.Expression
 literal = AST.Literal <$> lexeme (try parseNumber <|> stringLiteral <|> booleanLiteral <|> nullLiteral)
 
 -- | Terms
+
 term :: Parser AST.Expression
+
 term = choice
-  [
-    parens expr
+
+  [ parenthesized
+
   , AST.Everything <$ symbol "*"
+
   , AST.This <$ symbol "@"
+
   , AST.Parent <$ symbol "^"
+
   , AST.Ellipsis <$ symbol "..."
+
   , AST.Param <$> (char '$' *> identifier)
   , try functionCall
   , literal
@@ -105,6 +112,14 @@ term = choice
   , parseArray
   , parseObject
   ]
+
+-- | Parenthesized Expression (Group or Tuple)
+parenthesized :: Parser AST.Expression
+parenthesized = do
+  es <- parens (expr `sepBy1` symbol ",")
+  case es of
+    [e] -> return $ AST.Group e
+    es' -> return $ AST.Tuple es'
 
 -- | Function Call
 functionCall :: Parser AST.Expression
