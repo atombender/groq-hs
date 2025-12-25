@@ -4,22 +4,23 @@ module Groq.Parser (parseGroq, expr) where
 
 import Control.Monad ()
 import Control.Monad.Combinators.Expr
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
+import qualified Groq.AST as AST
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
-import qualified Groq.AST as AST
-import Data.Scientific (Scientific)
 
 type Parser = Parsec Void Text
 
 sc :: Parser ()
-sc = L.space
-  space1
-  (L.skipLineComment "//")
-  empty
+sc =
+  L.space
+    space1
+    (L.skipLineComment "//")
+    empty
 
 lexeme :: Parser a -> Parser a
 lexeme = L.lexeme sc
@@ -45,7 +46,7 @@ identifier :: Parser Text
 identifier = (lexeme . try) $ do
   c <- letterChar <|> char '_'
   cs <- many (alphaNumChar <|> char '_')
-  return $ T.pack (c:cs)
+  return $ T.pack (c : cs)
 
 -- | Literals
 stringLiteral :: Parser AST.Literal
@@ -56,32 +57,34 @@ parseNumber = do
   -- Parse integer part
   i <- L.decimal
   -- Check for dot
-  (do
-    try $ do
-      _ <- char '.'
-      notFollowedBy (char '.') -- crucial: if next is '.', back off!
-    -- It is a decimal point
-    frac <- L.decimal
-    -- Combine
-    let f = read (show i ++ "." ++ show frac) :: Scientific
-    -- Optional exponent
-    expPart <- optional ((char 'e' <|> char 'E') *> L.signed sc L.decimal)
-    let final = case expPart of
-                  Nothing -> f
-                  Just e -> f * (10 ^^ e)
-    return $ AST.FloatLiteral final
-   ) <|> (do
-     -- No dot or dot followed by dot
-     -- Check exponent for integer
-     expPart <- optional ((char 'e' <|> char 'E') *> L.signed sc L.decimal)
-     case expPart of
-       Nothing -> return $ AST.IntegerLiteral i
-       Just e -> return $ AST.FloatLiteral (fromIntegral i * (10 ^^ e))
-   )
+  ( do
+      try $ do
+        _ <- char '.'
+        notFollowedBy (char '.') -- crucial: if next is '.', back off!
+        -- It is a decimal point
+      frac <- L.decimal
+      -- Combine
+      let f = read (show i ++ "." ++ show frac) :: Scientific
+      -- Optional exponent
+      expPart <- optional ((char 'e' <|> char 'E') *> L.signed sc L.decimal)
+      let final = case expPart of
+            Nothing -> f
+            Just e -> f * (10 ^^ e)
+      return $ AST.FloatLiteral final
+    )
+    <|> ( do
+            -- No dot or dot followed by dot
+            -- Check exponent for integer
+            expPart <- optional ((char 'e' <|> char 'E') *> L.signed sc L.decimal)
+            case expPart of
+              Nothing -> return $ AST.IntegerLiteral i
+              Just e -> return $ AST.FloatLiteral (fromIntegral i * (10 ^^ e))
+        )
 
 booleanLiteral :: Parser AST.Literal
-booleanLiteral = (rword "true" *> pure (AST.BooleanLiteral True))
-             <|> (rword "false" *> pure (AST.BooleanLiteral False))
+booleanLiteral =
+  (rword "true" *> pure (AST.BooleanLiteral True))
+    <|> (rword "false" *> pure (AST.BooleanLiteral False))
 
 nullLiteral :: Parser AST.Literal
 nullLiteral = rword "null" *> pure AST.NullLiteral
@@ -90,28 +93,21 @@ literal :: Parser AST.Expression
 literal = AST.Literal <$> lexeme (try parseNumber <|> stringLiteral <|> booleanLiteral <|> nullLiteral)
 
 -- | Terms
-
 term :: Parser AST.Expression
-
-term = choice
-
-  [ parenthesized
-
-  , AST.Everything <$ symbol "*"
-
-  , AST.This <$ symbol "@"
-
-  , AST.Parent <$ symbol "^"
-
-  , AST.Ellipsis <$ symbol "..."
-
-  , AST.Param <$> (char '$' *> identifier)
-  , try functionCall
-  , literal
-  , AST.Attribute <$> identifier
-  , parseArray
-  , parseObject
-  ]
+term =
+  choice
+    [ parenthesized,
+      AST.Everything <$ symbol "*",
+      AST.This <$ symbol "@",
+      AST.Parent <$ symbol "^",
+      AST.Ellipsis <$ symbol "...",
+      AST.Param <$> (char '$' *> identifier),
+      try functionCall,
+      literal,
+      AST.Attribute <$> identifier,
+      parseArray,
+      parseObject
+    ]
 
 -- | Parenthesized Expression (Group or Tuple)
 parenthesized :: Parser AST.Expression
@@ -151,36 +147,35 @@ objectField = try spread <|> attribute
 
 -- | Operator Table
 operatorTable :: [[Operator Parser AST.Expression]]
-operatorTable = 
-  [
-    [ Prefix (AST.PrefixOperator AST.OpNot <$ symbol "!")
-    , Prefix (AST.PrefixOperator AST.OpUnaryPlus <$ symbol "+")
-    , Prefix (AST.PrefixOperator AST.OpUnaryMinus <$ symbol "-")
-    ]
-  , [ InfixR (AST.BinaryOperator AST.OpExponentiation <$ symbol "**") ]
-  , [ InfixL (AST.BinaryOperator AST.OpAsterisk <$ symbol "*")
-    , InfixL (AST.BinaryOperator AST.OpSlash <$ symbol "/")
-    , InfixL (AST.BinaryOperator AST.OpPercent <$ symbol "%")
-    ]
-  , [ InfixL (AST.BinaryOperator AST.OpPlus <$ symbol "+")
-    , InfixL (AST.BinaryOperator AST.OpMinus <$ symbol "-")
-    ]
-  , [ InfixL (AST.BinaryOperator AST.OpIn <$ symbol "in")
-    , InfixL (AST.BinaryOperator AST.OpMatch <$ symbol "match")
-    ]
-  , [ InfixL (AST.BinaryOperator AST.OpLTE <$ symbol "<=")
-    , InfixL (AST.BinaryOperator AST.OpLT <$ symbol "<")
-    , InfixL (AST.BinaryOperator AST.OpGTE <$ symbol ">=")
-    , InfixL (AST.BinaryOperator AST.OpGT <$ symbol ">")
-    ]
-  , [ InfixL (AST.BinaryOperator AST.OpEquals <$ symbol "==")
-    , InfixL (AST.BinaryOperator AST.OpNotEquals <$ symbol "!=")
-    ]
-  , [ InfixL (AST.BinaryOperator AST.OpAnd <$ symbol "&&") ]
-  , [ InfixL (AST.BinaryOperator AST.OpOr <$ symbol "||") ]
-  , [ InfixL (AST.PipeOperator <$ symbol "|") ]
-  , [ Postfix (AST.PostfixOperator AST.OpAsc <$ symbol "asc")
-    , Postfix (AST.PostfixOperator AST.OpDesc <$ symbol "desc")
+operatorTable =
+  [ [ Prefix (AST.PrefixOperator AST.OpNot <$ symbol "!"),
+      Prefix (AST.PrefixOperator AST.OpUnaryPlus <$ symbol "+"),
+      Prefix (AST.PrefixOperator AST.OpUnaryMinus <$ symbol "-")
+    ],
+    [InfixR (AST.BinaryOperator AST.OpExponentiation <$ symbol "**")],
+    [ InfixL (AST.BinaryOperator AST.OpAsterisk <$ symbol "*"),
+      InfixL (AST.BinaryOperator AST.OpSlash <$ symbol "/"),
+      InfixL (AST.BinaryOperator AST.OpPercent <$ symbol "%")
+    ],
+    [ InfixL (AST.BinaryOperator AST.OpPlus <$ symbol "+"),
+      InfixL (AST.BinaryOperator AST.OpMinus <$ symbol "-")
+    ],
+    [ InfixL (AST.BinaryOperator AST.OpIn <$ symbol "in"),
+      InfixL (AST.BinaryOperator AST.OpMatch <$ symbol "match")
+    ],
+    [ InfixL (AST.BinaryOperator AST.OpLTE <$ symbol "<="),
+      InfixL (AST.BinaryOperator AST.OpLT <$ symbol "<"),
+      InfixL (AST.BinaryOperator AST.OpGTE <$ symbol ">="),
+      InfixL (AST.BinaryOperator AST.OpGT <$ symbol ">")
+    ],
+    [ InfixL (AST.BinaryOperator AST.OpEquals <$ symbol "=="),
+      InfixL (AST.BinaryOperator AST.OpNotEquals <$ symbol "!=")
+    ],
+    [InfixL (AST.BinaryOperator AST.OpAnd <$ symbol "&&")],
+    [InfixL (AST.BinaryOperator AST.OpOr <$ symbol "||")],
+    [InfixL (AST.PipeOperator <$ symbol "|")],
+    [ Postfix (AST.PostfixOperator AST.OpAsc <$ symbol "asc"),
+      Postfix (AST.PostfixOperator AST.OpDesc <$ symbol "desc")
     ]
   ]
 
@@ -194,10 +189,12 @@ termWithTraversals = do
   traversals base
 
 traversals :: AST.Expression -> Parser AST.Expression
-traversals base = (do
-    t <- traversal
-    traversals (applyTraversal base t)
-  ) <|> pure base
+traversals base =
+  ( do
+      t <- traversal
+      traversals (applyTraversal base t)
+  )
+    <|> pure base
 
 data Traversal
   = TDot Text
@@ -209,12 +206,13 @@ data Traversal
   | TDereference (Maybe Text)
 
 traversal :: Parser Traversal
-traversal = choice
-    [ try (TDot <$> (symbol "." *> identifier))
-    , try (symbol "[" *> symbol "]" *> pure TArrayPostfix)
-    , brackets bracketContent
-    , TDereference <$> (symbol "->" *> optional identifier)
-    , TProjection <$> AST.Object <$> braces (objectField `sepBy` symbol ",")
+traversal =
+  choice
+    [ try (TDot <$> (symbol "." *> identifier)),
+      try (symbol "[" *> symbol "]" *> pure TArrayPostfix),
+      brackets bracketContent,
+      TDereference <$> (symbol "->" *> optional identifier),
+      TProjection <$> AST.Object <$> braces (objectField `sepBy` symbol ",")
     ]
 
 -- | Disambiguate [...] content
@@ -222,11 +220,12 @@ bracketContent :: Parser Traversal
 bracketContent = do
   e <- expr
   -- check for range
-  (do
+  ( do
       op <- (try (symbol "...") *> pure False) <|> (symbol ".." *> pure True)
       end <- expr
       return $ TSlice e end op
-    ) <|> (return $ disambiguateBracket e)
+    )
+    <|> (return $ disambiguateBracket e)
 
 disambiguateBracket :: AST.Expression -> Traversal
 disambiguateBracket e@(AST.Literal (AST.IntegerLiteral _)) = TElement e
